@@ -1,146 +1,177 @@
+# person_details_manager.py
+
 import sqlite3
 
-# Initialize the database
-def initialize_database():
-    conn = sqlite3.connect("personal_info.db")
-    cursor = conn.cursor()
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS personal_info (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        name TEXT NOT NULL,
-        age INTEGER NOT NULL,
-        phone TEXT NOT NULL,
-        height REAL NOT NULL,
-        email TEXT NOT NULL
-    )
-    """)
-    conn.commit()
-    conn.close()
 
-# Add personal information to the database
-def add_personal_info(name, age, phone, height, email):
-    conn = sqlite3.connect("personal_info.db")
-    cursor = conn.cursor()
-    cursor.execute("""
-    INSERT INTO personal_info (name, age, phone, height, email)
-    VALUES (?, ?, ?, ?, ?)
-    """, (name, age, phone, height, email))
-    conn.commit()
-    conn.close()
-    log_activity(f"Added new person: {name}, {age}, {phone}, {height}, {email}")
+class PersonDatabase:
+    """Handles all database operations for person details."""
 
-# Update personal information with confirmation
-def update_personal_info(column, value, name):
-    conn = sqlite3.connect("personal_info.db")
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM personal_info WHERE name = ?", (name,))
-    result = cursor.fetchone()
-    if not result:
-        print(f"No record found for {name}.")
-        conn.close()
-        return
+    def __init__(self, db_name="person_details.db"):
+        self.connection = sqlite3.connect(db_name)
+        self.cursor = self.connection.cursor()
+        self.create_table()
 
-    print(f"Current record for {name}: {result}")
-    confirmation = input(f"Are you sure you want to update {column} to '{value}' for {name}? (yes/no): ").lower()
-    if confirmation == "yes":
-        cursor.execute(f"UPDATE personal_info SET {column} = ? WHERE name = ?", (value, name))
-        conn.commit()
-        print(f"{column} for {name} has been updated to {value}.")
-        log_activity(f"Updated {column} for {name} to {value}")
-    else:
-        print("Update canceled.")
-    conn.close()
+    def create_table(self):
+        """Create the persons table if it doesn't already exist."""
+        self.cursor.execute("""
+            CREATE TABLE IF NOT EXISTS persons (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                age INTEGER NOT NULL,
+                email TEXT UNIQUE NOT NULL
+            )
+        """)
+        self.connection.commit()
 
-# Delete personal information with confirmation
-def delete_personal_info(name):
-    conn = sqlite3.connect("personal_info.db")
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM personal_info WHERE name = ?", (name,))
-    result = cursor.fetchone()
-    if not result:
-        print(f"No record found for {name}.")
-        conn.close()
-        return
+    def add_person(self, name, age, email):
+        """Add a new person to the database."""
+        try:
+            self.cursor.execute("INSERT INTO persons (name, age, email) VALUES (?, ?, ?)", (name, age, email))
+            self.connection.commit()
+            print("Person added successfully.")
+        except sqlite3.IntegrityError:
+            print("Error: Email already exists in the database.")
 
-    print(f"Current record for {name}: {result}")
-    confirmation = input(f"Are you sure you want to delete the record for {name}? (yes/no): ").lower()
-    if confirmation == "yes":
-        cursor.execute("DELETE FROM personal_info WHERE name = ?", (name,))
-        conn.commit()
-        print(f"Record for {name} has been deleted.")
-        log_activity(f"Deleted record for {name}")
-    else:
-        print("Deletion canceled.")
-    conn.close()
+    def view_person(self, person_id):
+        """Retrieve details of a person by ID."""
+        self.cursor.execute("SELECT * FROM persons WHERE id = ?", (person_id,))
+        result = self.cursor.fetchone()
+        if result:
+            print(f"ID: {result[0]}, Name: {result[1]}, Age: {result[2]}, Email: {result[3]}")
+        else:
+            print("No person found with the given ID.")
 
-# Search for a person based on a specific field
-def search_person(field, value):
-    conn = sqlite3.connect("personal_info.db")
-    cursor = conn.cursor()
-    cursor.execute(f"SELECT * FROM personal_info WHERE {field} = ?", (value,))
-    results = cursor.fetchall()
-    conn.close()
-    if results:
-        for row in results:
-            print(row)
-        log_activity(f"Searched for {field} = {value}, found {len(results)} result(s).")
-    else:
-        print(f"No records found for {field} = {value}.")
-        log_activity(f"Searched for {field} = {value}, found 0 results.")
+    def update_person(self, person_id, name=None, age=None, email=None):
+        """Update details of an existing person."""
+        existing_person = self.cursor.execute("SELECT * FROM persons WHERE id = ?", (person_id,)).fetchone()
+        if not existing_person:
+            print("Error: No person found with the given ID.")
+            return
 
-# Log activity to a file
-def log_activity(activity, filename="activity_log.txt"):
-    with open(filename, "a") as file:
-        file.write(activity + "\n")
+        # Use existing values if no update is provided
+        updated_name = name if name else existing_person[1]
+        updated_age = age if age else existing_person[2]
+        updated_email = email if email else existing_person[3]
 
-# Main program
-if __name__ == "__main__":
-    print("Welcome! Let's manage your personal information.")
-    print("Type 'exit' to quit the program.")
+        try:
+            self.cursor.execute("""
+                UPDATE persons
+                SET name = ?, age = ?, email = ?
+                WHERE id = ?
+            """, (updated_name, updated_age, updated_email, person_id))
+            self.connection.commit()
+            print("Person details updated successfully.")
+        except sqlite3.IntegrityError:
+            print("Error: Email already exists in the database.")
 
-    initialize_database()
+    def delete_person(self, person_id):
+        """Delete a person from the database."""
+        self.cursor.execute("DELETE FROM persons WHERE id = ?", (person_id,))
+        if self.cursor.rowcount > 0:
+            self.connection.commit()
+            print("Person deleted successfully.")
+        else:
+            print("Error: No person found with the given ID.")
+
+    def search_person(self, name=None, age=None, email=None):
+        """Search for people by name, age, or email."""
+        query = "SELECT * FROM persons WHERE 1=1"
+        params = []
+
+        if name:
+            query += " AND name LIKE ?"
+            params.append(f"%{name}%")
+        if age:
+            query += " AND age = ?"
+            params.append(age)
+        if email:
+            query += " AND email LIKE ?"
+            params.append(f"%{email}%")
+
+        self.cursor.execute(query, tuple(params))
+        results = self.cursor.fetchall()
+
+        if results:
+            for person in results:
+                print(f"ID: {person[0]}, Name: {person[1]}, Age: {person[2]}, Email: {person[3]}")
+        else:
+            print("No matching persons found.")
+
+    def show_all(self):
+        """Display all persons in the database."""
+        self.cursor.execute("SELECT * FROM persons")
+        results = self.cursor.fetchall()
+
+        if results:
+            for person in results:
+                print(f"ID: {person[0]}, Name: {person[1]}, Age: {person[2]}, Email: {person[3]}")
+        else:
+            print("No persons found in the database.")
+
+    def close(self):
+        """Close the database connection."""
+        self.connection.close()
+
+
+def main():
+    db = PersonDatabase()
 
     while True:
-        print("\nOptions:")
-        print("1. Add a new person")
-        print("2. Update existing information")
-        print("3. Delete a person")
-        print("4. Search for a person")
-        print("5. Exit")
+        print("\nPerson Details Manager Menu:")
+        print("1. Add Person")
+        print("2. View Person")
+        print("3. Update Person")
+        print("4. Delete Person")
+        print("5. Search Person")
+        print("6. Show All")
+        print("7. Exit")
 
-        choice = input("\nSelect an option (1-5): ")
+        choice = input("Enter your choice (1-7): ")
 
         if choice == "1":
-            # Add a new person
             name = input("Enter name: ")
             age = int(input("Enter age: "))
-            phone = input("Enter phone number: ")
-            height = float(input("Enter height (in cm): "))
             email = input("Enter email: ")
-            add_personal_info(name, age, phone, height, email)
-            print(f"New person {name} has been added.")
+            db.add_person(name, age, email)
 
         elif choice == "2":
-            # Update existing information
-            name = input("Enter the name of the person to update: ")
-            column = input("Enter the column to update (age, phone, height, email): ")
-            value = input(f"Enter the new value for {column}: ")
-            update_personal_info(column, value, name)
+            person_id = int(input("Enter person ID: "))
+            db.view_person(person_id)
 
         elif choice == "3":
-            # Delete a person
-            name = input("Enter the name of the person to delete: ")
-            delete_personal_info(name)
+            person_id = int(input("Enter person ID to update: "))
+            print("Enter updated details (leave blank to keep current values):")
+            name = input("Enter name: ")
+            age = input("Enter age: ")
+            email = input("Enter email: ")
+
+            updated_age = int(age) if age else None
+            db.update_person(person_id, name=name, age=updated_age, email=email)
 
         elif choice == "4":
-            # Search for a person
-            field = input("Enter the field to search by (name, age, phone, height, email): ")
-            value = input(f"Enter the value to search for in {field}: ")
-            search_person(field, value)
+            person_id = int(input("Enter person ID to delete: "))
+            db.delete_person(person_id)
 
         elif choice == "5":
-            print("Goodbye!")
+            print("Enter search criteria (leave blank to skip):")
+            name = input("Enter name: ")
+            age = input("Enter age: ")
+            email = input("Enter email: ")
+
+            search_age = int(age) if age else None
+            db.search_person(name=name, age=search_age, email=email)
+
+        elif choice == "6":
+            db.show_all()
+
+        elif choice == "7":
+            print("Exiting the program. Goodbye!")
+            db.close()
             break
 
         else:
-            print("Invalid option. Please try again.")
+            print("Invalid choice! Please try again.")
+
+
+if __name__ == "__main__":
+    main()
